@@ -1,18 +1,18 @@
 library(data.table)
 library(akmeans)
 library(ggplot2)
-#set.seed(1)
-#cl.test = akmeans(as.matrix(normalized_ad[,3:8562]),d.metric = 2, ths3 = 0.000000000000001, mode = 3, min.k = 2)
-#cl.test$size
-#cl.test2 = norm.sim.ksc(as.matrix(normalized_ad[,3:8562]), k =4)
-#cl.test2$size
+
 
 #1. Similarity: Dot Product
 sqr.sum.root = sqrt(rowSums(normalized_ad[,3:8562]^2))
+#Transform the normalized data further into having length = 1
 transformed_ad = normalized_ad[,3:8562]/sqr.sum.root
-rowSums(transformed_ad^2)
+#Santy Check
+rowSums(transformed_ad^2)[1:5]
 
-
+#Construct a function to run Kmeans Clustering on k between min_k and max_k;
+#Also return a table of in-cluster and between cluster similarity with corresponding k
+#as S and D
 kmeans.dot.product = function(norm_data=transformed_ad, min_k, max_k, original_data=normalized_ad[,3:8562]){
   avg.in.sim.list = 0
   avg.btw.sim.list = 0
@@ -66,15 +66,34 @@ kmeans.dot.product = function(norm_data=transformed_ad, min_k, max_k, original_d
   merge(avg.in.sim.list, avg.btw.sim.list, by = "k")
 }
 
-dot.out = kmeans.dot.product(min_k=2, max_k=100) #10:42 - 12:00
+#Call on k = 2,3,...100
+dot.out = kmeans.dot.product(min_k=2, max_k=100) #about 1.5hr runtime
 dot.out$`S/D` = dot.out$S/dot.out$D
 write.csv(dot.out[-1,], "kmeans_dot_out.csv", row.names = F)
 
+#reshape the data to feed into ggplot
 dot.out.gg = reshape(dot.out[-1,], idvar = "k", times = names(dot.out)[2:4], varying = list(names(dot.out)[2:4]),direction="long")
 colnames(dot.out.gg) = c("k","type", "value")
-ggplot(dot.out.gg, aes(x=k, y = value, col = type)) + geom_line()+ylim(c(-1500,500))
+dot.out.gg$type <- factor(dot.out.gg$type, levels = c("S", "D", "S/D"))
 
-#. Similarity: Euclidean
+#visualize
+#all 3 meaures
+ggplot(dot.out.gg, aes(x=k, y = value, col = type)) + geom_line()+
+  labs(title = "Simiarity from Product-based Kmeans Clustering with Varying K")
+dot.out.gg = data.table(dot.out.gg)
+#individual measure separately plotted
+ggplot(dot.out.gg[type == "S/D",], aes(x=k, y = value)) + geom_line()+ geom_point()+
+  ylim(c(-20,0))+ xlim(c(0,25))+
+  labs(title = "Negative S/D with absolute value < 20")
+ggplot(dot.out.gg[type == "S",], aes(x=k, y = value, col = "pink")) + geom_line()+ geom_point()+
+  labs(title = "Avg In-cluster Similarity", y ="S")
+ggplot(dot.out.gg[type == "D",], aes(x=k, y = value)) + geom_line(col="seagreen3")+ geom_point(col="seagreen3")+
+  labs(title = "Avg Between-cluster Similarity", y ="D")
+
+
+#2. Similarity: Euclidean
+#Construct a function to run Euclidean-based clustering on k in k_list
+#similarly, return a table of S, D, k
 iter_kmeans = function(data=normalized_ad[,3:8562], k_list){
   datam = as.matrix(data)
   output = 0
@@ -86,21 +105,29 @@ iter_kmeans = function(data=normalized_ad[,3:8562], k_list){
   output[-1,]
 }
 
+#Call on k = 2,3, ...100
 eu.out = iter_kmeans(k_list = seq(2,100,1))
 eu.out = data.frame(eu.out)
 eu.out$`S/D` = eu.out$S/eu.out$D
 write.csv(eu.out, "kmeans_eu_out.csv", row.names = F)
 
+#reshape the data to feed ggplot
 eu.out.gg = reshape(eu.out[-1,], idvar = "k", times = names(eu.out)[c(1:2,4)], varying = list(names(eu.out)[c(1:2,4)]),direction="long")
 colnames(eu.out.gg) = c("k","type", "value")
-ggplot(eu.out.gg, aes(x=k, y = value, col = type)) + geom_line()
+eu.out.gg$type <- factor(eu.out.gg$type, levels = c("S", "D", "S/D"))
 
+#visualize
+ggplot(eu.out.gg, aes(x=k, y = value, col = type)) + geom_line()+
+  labs(title = "Simiarity from Euclidean-based Kmeans Clustering with Varying K")
+eu.out.gg = data.table(eu.out.gg)
+ggplot(eu.out.gg[type == "S/D",], aes(x=k, y = value)) + geom_line(col="steelblue3")+ geom_point(col="steelblue3")+
+  labs(title = "S/D vs. K") + labs(y = "S/D")
 
-# Visualize together
+# Visualize both dot product & euclidean-based together
 dot.out.gg$fig = "dot product"
 eu.out.gg$fig = "euclidean"
 all = rbindlist(list(dot.out.gg, eu.out.gg), use.names = T, fill = T)
 all$type <- factor(all$type, levels = c("S", "D", "S/D"))
-ggplot(all, aes(x=k, y = value, col = type)) + geom_line(size = 0.01) + geom_point()+
+ggplot(all, aes(x=k, y = value, col = type)) + geom_line(size = 0.01) + geom_point(size = 0.1)+
   facet_grid(fig ~., scales = "free_y")+
   labs(title = "Simiarity from Kmeans Clustering with Varying K")
